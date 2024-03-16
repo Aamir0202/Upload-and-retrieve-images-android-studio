@@ -1,9 +1,14 @@
 package com.example.profile;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.content.DialogInterface;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
@@ -45,6 +50,10 @@ import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -52,6 +61,13 @@ public class MainActivity extends AppCompatActivity {
     ImageView imageView;
     Bitmap bitmap;
     String encodedImage;
+    private int REQUEST_CODE = 11;
+    private boolean selectingFromCamera = false; // Flag to track image source
+    private static final String CAMERA_PERMISSION = Manifest.permission.CAMERA;
+    private static final String LOCATION_PERMISSION =  Manifest.permission.ACCESS_FINE_LOCATION;
+    private static  String READ_STORAGE_PERMISSION;
+    private static final int REQUEST_IMAGE_CAPTURE = 1;
+    private static final int REQUEST_IMAGE_GALLERY = 2;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -61,33 +77,18 @@ public class MainActivity extends AppCompatActivity {
         btnUploadImage = findViewById(R.id.btnUploadImage);
         imageView = findViewById(R.id.imView);
 
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU){
+            READ_STORAGE_PERMISSION = Manifest.permission.READ_MEDIA_IMAGES;
+        }else {
+            READ_STORAGE_PERMISSION = Manifest.permission.READ_EXTERNAL_STORAGE;
+
+        }
+
+
         btnSelectImage.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-
-                Dexter.withActivity(MainActivity.this)
-                        .withPermission(Manifest.permission.READ_EXTERNAL_STORAGE)
-                        .withListener(new PermissionListener() {
-                            @Override
-                            public void onPermissionGranted(PermissionGrantedResponse response) {
-
-                                Intent intent  = new Intent(Intent.ACTION_PICK);
-                                intent.setType("image/*");
-                                startActivityForResult(Intent.createChooser(intent,"Select Image"),1);
-
-                            }
-
-                            @Override
-                            public void onPermissionDenied(PermissionDeniedResponse response) {
-
-                            }
-
-                            @Override
-                            public void onPermissionRationaleShouldBeShown(PermissionRequest permission, PermissionToken token) {
-                                token.continuePermissionRequest();
-                            }
-                        }).check();
-
+                showPermissionDialog();
 
             }
         });
@@ -124,31 +125,30 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-
-        if(requestCode == 1 && resultCode == RESULT_OK && data!=null){
-
+        if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK && selectingFromCamera) {
+            // Handle image capture from camera
+            Bundle extras = data.getExtras();
+            Bitmap imageBitmap = (Bitmap) extras.get("data");
+            imageView.setImageBitmap(imageBitmap);
+            imageStore(imageBitmap);
+        } else if (requestCode == REQUEST_IMAGE_GALLERY && resultCode == RESULT_OK && !selectingFromCamera) {
+            // Handle image selection from gallery
             Uri filePath = data.getData();
-
             try {
                 InputStream inputStream = getContentResolver().openInputStream(filePath);
                 bitmap = BitmapFactory.decodeStream(inputStream);
-                imageView.setImageBitmap(bitmap);
-
+                imageView.setImageBitmap(bitmap); // Set the selected image bitmap to the ImageView
                 imageStore(bitmap);
-
-
             } catch (FileNotFoundException e) {
                 e.printStackTrace();
             }
-
-
         }
-
         super.onActivityResult(requestCode, resultCode, data);
-
     }
+
 
     private void imageStore(Bitmap bitmap) {
 
@@ -165,4 +165,66 @@ public class MainActivity extends AppCompatActivity {
     public void btnShowImages(View view) {
         startActivity(new Intent(getApplicationContext(),ShowImages.class));
     }
+    private void showPermissionDialog() {
+
+        if (ContextCompat.checkSelfPermission(this,CAMERA_PERMISSION) == PackageManager.PERMISSION_GRANTED
+                && ContextCompat.checkSelfPermission(this,READ_STORAGE_PERMISSION)  == PackageManager.PERMISSION_GRANTED
+        ){
+            //Toast.makeText(this, "Permission accepted", Toast.LENGTH_SHORT).show();
+            chooseImage();
+
+        }else {
+            ActivityCompat.requestPermissions(this, new String[]{ CAMERA_PERMISSION , READ_STORAGE_PERMISSION },REQUEST_CODE);
+        }
+
+
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if(requestCode == REQUEST_CODE){
+            if(grantResults.length > 0){
+                if(grantResults[0] == PackageManager.PERMISSION_GRANTED && grantResults[1] == PackageManager.PERMISSION_GRANTED
+                ){
+                    chooseImage();
+                }
+                else {
+                    Toast.makeText(this, "Permission Denied!", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+        }else {
+            showPermissionDialog();
+        }
+
+    }
+    private void chooseImage() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Choose Image Source");
+        builder.setItems(new CharSequence[]{"Camera", "Gallery"}, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                Intent intent;
+                switch (which) {
+                    case 0:
+                        intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                        if (intent.resolveActivity(getPackageManager()) != null) {
+                            startActivityForResult(intent, REQUEST_IMAGE_CAPTURE);
+                            selectingFromCamera = true;
+                        }
+                        break;
+                    case 1:
+                        intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                        intent.setType("image/*");
+                        startActivityForResult(intent, REQUEST_IMAGE_GALLERY);
+                        selectingFromCamera = false;
+                        break;
+                }
+            }
+        });
+        builder.show();
+    }
+
 }
